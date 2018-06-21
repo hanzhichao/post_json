@@ -13,3 +13,9 @@
     2. verbose = 2: 只显示resp.text
     3. verbose = 3: 显示 请求, 响应, 断言 
 2. 签名
+
+
+## requirements
+jinja2
+requests
+

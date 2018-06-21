@@ -1,8 +1,14 @@
 import json
-import sys
-import requests
 import optparse
 import os
+import requests
+from jinja2 import Template
+
+
+cli_opt = optparse.OptionParser()
+cli_opt.add_option("--collect-only", action="store_true", dest="collect_only", help="列出所有用例")
+cli_opt.add_option("--verbose", action="store", dest="verbose", help="显示级别: 1. 只显示用例结果 2. 只显示响应文本(默认) 3. 显示请求,响应及断言信息")
+(options, args) = cli_opt.parse_args()
 
 
 def postJson(path, timeout=60):
@@ -37,9 +43,6 @@ def postJson(path, timeout=60):
                 data = json.dumps(data)
 
             # 根据method发送不同请求
-            print("="*80)
-            print("请求:")
-            print("Url: %s\nHeaders: %s\nData: %s" % (url, headers, data if isinstance(data, str) else json.dumps(data)))
             if method and method.lower() == 'get':
                 response = session.get(url=url, headers=headers, cookies=cookies, params=params, data=data, files=files, timeout=timeout)
             else:
@@ -50,42 +53,57 @@ def postJson(path, timeout=60):
                 for key in _store:
                     globals()[key]=eval(_store[key])
             
-            # 打印结果
-            print("-"*80)
-            print("响应:")
+            # 处理响应
             try:
-                print(json.dumps(response.json(), ensure_ascii=False, indent=2))
+                response_text = json.dumps(response.json(), ensure_ascii=False, indent=2)
             except json.decoder.JSONDecodeError:  # only python3
                 try:
-                    print(response.text)
+                    response_text = response.text
                 except UnicodeEncodeError:
                     # print(response.content.decode("utf-8","ignore").replace('\xa9', ''))
-                    print(response.content)
+                    response_text = response.content
             finally:
                 pass
 
             # 处理断言
+            status = "PASS"
             if _assert:
-                print("-"*80)
-                print("断言:")
+                assert_results = []
                 for item in _assert:
                     try:
                         assert eval(item)
-                        print("PASS: <%s>" % item)
+                        assert_results.append("PASS: <%s>" % item)
                     except AssertionError:
-                        print("FAIL: <%s>" % item)
+                        assert_results.append("FAIL: <%s>" % item)
+                        status = "FAIL"
+                    except Exception as e:
+                        assert_results.append("ERROR: <%s>\n%s" % (item, repr(e)))
+                        status = "ERROR"  # 应放在post方法上
+            
+            # 打印结果
+            if not options.verbose or options.verbose == '2':
+                print(response_text)
+            elif options.verbose == '3':
+                print("="*80)
+                print("请求:")
+                print("Url: %s\nHeaders: %s\nData: %s" % (url, headers, data if isinstance(data, str) else json.dumps(data)))
+                print("-"*80)
+                print("响应:")
+                print(response_text)
+                if _assert:
+                    print("-"*80)
+                    print("断言:")
+                    for assert_result in assert_results:
+                        print(assert_result)
+            else:
+                print("%s --- %s" % (path, status))
+
     
     except IOError as e:
         print(e)
 
     except json.decoder.JSONDecodeError:
         print("json文件格式有误")
-
-def main():
-    if len(sys.argv) != 2:
-        print("缺少参数：json文件")
-    else:
-        postJson(sys.argv[1])
 
 
 def discover(path="."):
@@ -95,7 +113,13 @@ def discover(path="."):
                 postJson(os.path.join(root, file))
 
 def report():
-    pass
+    with open("report.tpl", encoding="utf-8") as f:
+        report_body = f.read()
+    t = Template(report_body)
+    cases = [{"case_name": "case1", "result": "PASS"}, {"case_name": "case2", "result": "ERROR"}, {"case_name": "case3", "result": "PASS"}, {"case_name": "case4", "result": "FAIL"}]
+
+    with open("report.html", "w", encoding="utf-8") as f:
+        f.write(t.render(title="PostJson测试报告", cases=cases))
 
 
 def collect_only(path="."):
@@ -107,13 +131,14 @@ def collect_only(path="."):
                 count += 1
         print("-"*80)
         print("Total: %d" % count)
+               
+def main():
+    path = args[0] if args else "."
+    if options.collect_only:
+        collect_only() if not args else collect_only(args[0])
+    else:
+        postJson(path)
 
-# main()                
 
-cli_opt = optparse.OptionParser()
-cli_opt.add_option("--collect-only", action="store_true", dest="collect_only", help="列出所有用例")
-(options, args) = cli_opt.parse_args()
-
-if options.collect_only:
-    collect_only() if not args else collect_only(args[0])
-
+main()
+# report()
